@@ -348,9 +348,19 @@ function renderCards() {
   const cols = orderedHeaders(headers);
   const titleCol = cols[0];
   const subCol = cols[1];
-  // "all" view: new entries first, then pre-existing in file order
-  const existingRows = allRows.filter((t) => !t.__new);
-  const data = currentMode === "new" ? newRows : [...newRows, ...existingRows];
+  const ratings = getRatings();
+  // sort order: Unrated first, then 5 -> 4 -> 3 -> 2 -> 1; ties keep new-on-top, then file order
+  const rankOf = (v) => (v ? 6 - Number(v) : 0);
+  const base = currentMode === "new" ? newRows : allRows;
+  const data = base
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => {
+      const ra = rankOf(ratings[a.t.id]), rb = rankOf(ratings[b.t.id]);
+      if (ra !== rb) return ra - rb;
+      if (a.t.__new !== b.t.__new) return a.t.__new ? -1 : 1;
+      return a.i - b.i;
+    })
+    .map((x) => x.t);
   const wrap = $("cards");
   wrap.innerHTML = "";
 
@@ -364,7 +374,6 @@ function renderCards() {
     return;
   }
 
-  const ratings = getRatings();
   data.forEach((t) => {
     const card = document.createElement("div");
     card.className = "pos" + (t.__new ? " new" : "");
@@ -388,6 +397,7 @@ function renderCards() {
       if (sel.value) all[t.id] = sel.value; else delete all[t.id];
       saveRatings(all);
       sel.setAttribute("data-r", sel.value);
+      renderCards(); // auto re-sort: Unrated -> 5 -> 4 -> 3 -> 2 -> 1
     });
     head.appendChild(sel);
     card.appendChild(head);
