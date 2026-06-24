@@ -606,10 +606,16 @@ async function sendLink() {
   if (!email) { $("login-status").textContent = "Please enter your email."; return; }
   $("login-status").textContent = "Sending…";
   try {
-    await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
-    $("login-status").textContent = "If that address is allowed, a sign-in link is on its way. Check your email (and spam).";
+    const r = await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    if (r.ok) {
+      $("login-status").textContent = "If that address is allowed, a sign-in link is on its way. Check your email (and spam).";
+    } else {
+      let detail = "";
+      try { const j = await r.json(); detail = j.detail || j.error || ""; } catch {}
+      $("login-status").textContent = "Couldn't send the link: " + (detail || ("server error " + r.status));
+    }
   } catch {
-    $("login-status").textContent = "Something went wrong. Please try again.";
+    $("login-status").textContent = "Network error — please try again.";
   }
 }
 $("logout").addEventListener("click", async () => {

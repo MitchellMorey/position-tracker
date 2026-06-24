@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
       const link = `${proto}://${req.headers.host}/api/auth/verify?token=${token}`;
       await sendEmail(email, link);
     } catch (e) {
-      res.status(500).json({ error: "Could not send sign-in link." });
+      res.status(500).json({ error: "Could not send sign-in link.", detail: String(e && e.message ? e.message : e) });
       return;
     }
   }
