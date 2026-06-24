@@ -129,10 +129,31 @@
 </head>
 <body>
 <header>
-  <h1>Position Tracker</h1>
-  <div class="sub">Upload an Excel file of positions. New ones — not seen in any earlier upload — are flagged. Click a card for full details.</div>
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap">
+    <div>
+      <h1>Position Tracker</h1>
+      <div class="sub">Upload an Excel file of positions. New ones — not seen in any earlier upload — are flagged. Click a card for full details.</div>
+    </div>
+    <div id="account" class="hidden" style="font-size:13px;color:var(--muted);white-space:nowrap">
+      <span id="account-email"></span>
+      <button id="logout" style="margin-left:10px;padding:6px 10px">Sign out</button>
+    </div>
+  </div>
 </header>
 <main>
+
+  <div id="login" class="card hidden" style="max-width:440px;margin:40px auto">
+    <h2 style="margin:0 0 6px;font-size:18px">Sign in</h2>
+    <p class="muted" style="margin-top:0">Enter your email and we'll send you a sign-in link.</p>
+    <div class="row" style="margin-top:8px">
+      <input id="login-email" type="email" inputmode="email" placeholder="you@example.com"
+             style="flex:1;min-width:200px;font:inherit;background:var(--panel-2);color:var(--text);border:1px solid var(--border);border-radius:8px;padding:9px 12px" />
+      <button id="login-btn" class="primary">Email me a link</button>
+    </div>
+    <div id="login-status" class="hint" style="margin-top:10px"></div>
+  </div>
+
+  <div id="app">
 
   <div class="card">
     <div id="drop">
@@ -185,8 +206,10 @@
       <div class="muted" id="memo">No positions tracked yet.</div>
       <button id="reset" class="danger">Reset tracked history</button>
     </div>
-    <div class="hint">Positions, history, and ratings are stored in this browser only. Resetting clears tracked positions (ratings are kept).</div>
+    <div class="hint">Your positions, history, and ratings are saved to your account and sync across devices. Resetting clears tracked positions (ratings are kept).</div>
   </div>
+
+  </div><!-- /#app -->
 
 </main>
 
@@ -559,10 +582,65 @@ $("reset").addEventListener("click", () => {
   render();
 });
 
+// ---- auth UI ----
+function showApp(email) {
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  if (email) {
+    $("account").classList.remove("hidden");
+    $("account-email").textContent = "Signed in as " + email;
+  } else {
+    $("account").classList.add("hidden"); // local-only mode (no backend)
+  }
+}
+function showLogin() {
+  $("app").classList.add("hidden");
+  $("account").classList.add("hidden");
+  $("login").classList.remove("hidden");
+}
+
+$("login-btn").addEventListener("click", sendLink);
+$("login-email").addEventListener("keydown", (e) => { if (e.key === "Enter") sendLink(); });
+async function sendLink() {
+  const email = $("login-email").value.trim();
+  if (!email) { $("login-status").textContent = "Please enter your email."; return; }
+  $("login-status").textContent = "Sending…";
+  try {
+    await fetch("/api/auth/request", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ email }) });
+    $("login-status").textContent = "If that address is allowed, a sign-in link is on its way. Check your email (and spam).";
+  } catch {
+    $("login-status").textContent = "Something went wrong. Please try again.";
+  }
+}
+$("logout").addEventListener("click", async () => {
+  try { await fetch("/api/auth/logout", { method: "POST" }); } catch {}
+  // clear local cache so the next account on this browser doesn't inherit it
+  suspendSync = true;
+  localStorage.removeItem(POS_KEY);
+  localStorage.removeItem(META_KEY);
+  localStorage.removeItem(RATING_KEY);
+  location.reload();
+});
+
 // ---- init ----
-refreshMemo();
-render();
-loadFromBackend();
+async function init() {
+  refreshMemo();
+  try {
+    const r = await fetch("/api/me");
+    if (r.status === 200) {
+      const j = await r.json();
+      if (j.email) { showApp(j.email); render(); loadFromBackend(); return; }
+      showLogin(); return;
+    }
+    showLogin(); // API reachable but unexpected status
+  } catch {
+    // No backend at all (e.g. opened as a local file) -> local-only mode
+    showApp(null);
+    render();
+    loadFromBackend();
+  }
+}
+init();
 </script>
 </body>
 </html>
