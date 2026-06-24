@@ -15,8 +15,9 @@
     --muted: #94a3b8;
     --accent: #38bdf8;
     --new: #22c55e;
-    --new-bg: rgba(34, 197, 94, 0.12);
+    --new-bg: rgba(34, 197, 94, 0.10);
     --danger: #ef4444;
+    --danger-bg: rgba(239, 68, 68, 0.12);
   }
   * { box-sizing: border-box; }
   body {
@@ -26,13 +27,10 @@
     color: var(--text);
     line-height: 1.5;
   }
-  header {
-    padding: 28px 24px 16px;
-    border-bottom: 1px solid var(--border);
-  }
+  header { padding: 28px 24px 16px; border-bottom: 1px solid var(--border); }
   h1 { margin: 0; font-size: 22px; }
   .sub { color: var(--muted); margin-top: 4px; font-size: 14px; }
-  main { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  main { max-width: 1040px; margin: 0 auto; padding: 24px; }
   .card {
     background: var(--panel);
     border: 1px solid var(--border);
@@ -66,28 +64,58 @@
   button.primary { background: var(--accent); color: #06283d; border-color: var(--accent); font-weight: 600; }
   button.danger { color: var(--danger); }
   .stats { display: flex; gap: 24px; flex-wrap: wrap; }
-  .stat { }
   .stat .num { font-size: 28px; font-weight: 700; }
   .stat.new .num { color: var(--new); }
   .stat .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
-  table { width: 100%; border-collapse: collapse; font-size: 13px; }
-  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
-  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
-  tr.new td { background: var(--new-bg); }
-  .badge { display: inline-block; font-size: 11px; font-weight: 600; color: var(--new); border: 1px solid var(--new); border-radius: 999px; padding: 1px 8px; }
-  .table-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
   .hidden { display: none; }
   .muted { color: var(--muted); font-size: 13px; }
-  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 16px; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 16px; align-items: center; }
   .pill { font-size: 12px; color: var(--muted); }
   .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
-  a.link { color: var(--accent); }
+
+  #error {
+    background: var(--danger-bg);
+    border: 1px solid var(--danger);
+    color: #fecaca;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 14px;
+    font-size: 14px;
+  }
+  #error strong { color: #fff; }
+  #error ul { margin: 6px 0 0; padding-left: 18px; }
+
+  /* position cards */
+  #cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+  .pos {
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .pos.new { border-color: var(--new); background: var(--new-bg); }
+  .pos-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
+  .pos-title { font-size: 15px; font-weight: 700; }
+  .pos-sub { font-size: 12px; color: var(--muted); }
+  .badge { display: inline-block; font-size: 10px; font-weight: 700; color: var(--new); border: 1px solid var(--new); border-radius: 999px; padding: 1px 7px; margin-bottom: 6px; }
+  .fields { display: grid; gap: 4px; }
+  .field { display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 13px; border-top: 1px solid var(--border); padding-top: 4px; }
+  .field:first-child { border-top: none; padding-top: 0; }
+  .field .k { color: var(--muted); }
+  .field .v { word-break: break-word; }
+  .rate { padding: 5px 8px; font-size: 12px; max-width: 170px; }
+  .rate[data-r="5"] { border-color: #22c55e; color: #4ade80; }
+  .rate[data-r="4"] { border-color: #84cc16; color: #a3e635; }
+  .rate[data-r="3"] { border-color: #eab308; color: #facc15; }
+  .rate[data-r="2"] { border-color: #f97316; color: #fb923c; }
+  .rate[data-r="1"] { border-color: #ef4444; color: #f87171; }
+  .empty { color: var(--muted); padding: 20px; }
 </style>
 </head>
 <body>
 <header>
   <h1>Position Tracker</h1>
-  <div class="sub">Upload an Excel file of positions. New ones — those not seen in any earlier upload — are flagged.</div>
+  <div class="sub">Upload an Excel file of positions. New ones — not seen in any earlier upload — are flagged, and you can rate each.</div>
 </header>
 <main>
 
@@ -117,7 +145,8 @@
         <button id="process" class="primary">Find new positions</button>
       </div>
     </div>
-    <div class="hint">The match column should hold a unique value per position (e.g. Job ID or Req #). Auto-detected when possible. Set <strong>Header row</strong> if your column titles aren't on the first row.</div>
+    <div class="hint">The match column should hold a unique value per position. Set <strong>Header row</strong> if your column titles aren't on the first row.</div>
+    <div id="error" class="hidden"></div>
   </div>
 
   <div id="results" class="card hidden">
@@ -128,13 +157,11 @@
     </div>
     <div class="toolbar">
       <button id="view-new" class="primary">New only</button>
-      <button id="view-all">Show all rows</button>
-      <button id="export" >Export new (CSV)</button>
+      <button id="view-all">Show all</button>
+      <button id="export">Export (CSV)</button>
       <span class="pill" id="last-upload"></span>
     </div>
-    <div class="table-wrap">
-      <table id="tbl"><thead></thead><tbody></tbody></table>
-    </div>
+    <div id="cards"></div>
   </div>
 
   <div class="card">
@@ -142,42 +169,65 @@
       <div class="muted" id="memo">No positions tracked yet.</div>
       <button id="reset" class="danger">Reset tracked history</button>
     </div>
-    <div class="hint">History is stored in this browser only. Resetting means the next upload treats every position as new.</div>
+    <div class="hint">History and ratings are stored in this browser only. Resetting clears tracked positions and the expected file format (ratings are kept).</div>
   </div>
 
 </main>
 
 <script>
-const STORE_KEY = "positionTracker.knownIds.v1";
-const META_KEY  = "positionTracker.meta.v1";
+const STORE_KEY   = "positionTracker.knownIds.v1";
+const META_KEY    = "positionTracker.meta.v1";
+const SCHEMA_KEY  = "positionTracker.schema.v1";
+const RATING_KEY  = "positionTracker.ratings.v1";
+
+const PRIORITY = ["Billet Title", "Unit Name", "NRA Title", "AUIC Title", "Drill State"];
+const RATINGS = [
+  { v: "",  t: "— Rate —" },
+  { v: "5", t: "5 · Top option" },
+  { v: "4", t: "4 · Preferred assignment" },
+  { v: "3", t: "3 · OK assignment" },
+  { v: "2", t: "2 · Want to avoid" },
+  { v: "1", t: "1 · Do not select" },
+];
 
 let workbook = null;
-let rows = [];          // current sheet rows (array of objects)
-let headers = [];       // current sheet headers
-let lastResult = null;  // { newRows, allRows, idCol }
+let rows = [];
+let headers = [];
+let lastResult = null;
+let currentMode = "new";
 
 const $ = (id) => document.getElementById(id);
+const norm = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim();
 
-function getKnown() {
-  try { return new Set(JSON.parse(localStorage.getItem(STORE_KEY) || "[]")); }
-  catch { return new Set(); }
-}
-function saveKnown(set) {
-  localStorage.setItem(STORE_KEY, JSON.stringify([...set]));
-}
-function getMeta() {
-  try { return JSON.parse(localStorage.getItem(META_KEY) || "{}"); }
-  catch { return {}; }
-}
+// ---- storage helpers ----
+function getKnown() { try { return new Set(JSON.parse(localStorage.getItem(STORE_KEY) || "[]")); } catch { return new Set(); } }
+function saveKnown(s) { localStorage.setItem(STORE_KEY, JSON.stringify([...s])); }
+function getMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || "{}"); } catch { return {}; } }
 function saveMeta(m) { localStorage.setItem(META_KEY, JSON.stringify(m)); }
+function getSchema() { try { return JSON.parse(localStorage.getItem(SCHEMA_KEY) || "null"); } catch { return null; } }
+function saveSchema(h) { localStorage.setItem(SCHEMA_KEY, JSON.stringify(h)); }
+function getRatings() { try { return JSON.parse(localStorage.getItem(RATING_KEY) || "{}"); } catch { return {}; } }
+function saveRatings(r) { localStorage.setItem(RATING_KEY, JSON.stringify(r)); }
 
 function refreshMemo() {
   const n = getKnown().size;
   const meta = getMeta();
   const when = meta.lastUpload ? new Date(meta.lastUpload).toLocaleString() : null;
-  $("memo").textContent = n === 0
-    ? "No positions tracked yet."
-    : `${n} position${n===1?"":"s"} tracked` + (when ? ` · last upload ${when}` : "");
+  const schema = getSchema();
+  let txt = n === 0 ? "No positions tracked yet." : `${n} position${n===1?"":"s"} tracked` + (when ? ` · last upload ${when}` : "");
+  if (schema) txt += ` · format locked to ${schema.length} columns`;
+  $("memo").textContent = txt;
+}
+
+// ---- column ordering ----
+function orderedHeaders(hs) {
+  const present = [];
+  PRIORITY.forEach((p) => {
+    const found = hs.find((h) => norm(h) === norm(p));
+    if (found && !present.includes(found)) present.push(found);
+  });
+  const rest = hs.filter((h) => !present.includes(h));
+  return [...present, ...rest];
 }
 
 // ---- file handling ----
@@ -185,15 +235,11 @@ const drop = $("drop"), fileInput = $("file");
 drop.addEventListener("click", () => fileInput.click());
 drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
 drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
-drop.addEventListener("drop", (e) => {
-  e.preventDefault(); drop.classList.remove("drag");
-  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
-});
-fileInput.addEventListener("change", (e) => {
-  if (e.target.files.length) handleFile(e.target.files[0]);
-});
+drop.addEventListener("drop", (e) => { e.preventDefault(); drop.classList.remove("drag"); if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener("change", (e) => { if (e.target.files.length) handleFile(e.target.files[0]); });
 
 function handleFile(file) {
+  clearError();
   const reader = new FileReader();
   reader.onload = (ev) => {
     workbook = XLSX.read(ev.target.result, { type: "array" });
@@ -217,131 +263,182 @@ function populateSheets() {
 }
 
 function loadSheet() {
-  const name = $("sheet").value;
-  const ws = workbook.Sheets[name];
+  const ws = workbook.Sheets[$("sheet").value];
   const headerRow = Math.max(1, parseInt($("headerrow").value, 10) || 1);
-  // SheetJS range is 0-based; passing the header row index makes that row the headers
   rows = XLSX.utils.sheet_to_json(ws, { defval: "", range: headerRow - 1 });
   headers = rows.length ? Object.keys(rows[0]) : [];
   populateIdCol();
 }
 
-const ID_HINTS = ["job id","jobid","req id","reqid","requisition","req #","req#","req number","position id","posting id","id","jobcode","job code","reference","ref"];
+const ID_HINTS = ["job id","jobid","req id","reqid","requisition","req #","req#","req number","position id","posting id","billet id","auic","id","reference","ref"];
 function populateIdCol() {
   const sel = $("idcol");
   sel.innerHTML = "";
-  headers.forEach((h) => {
-    const o = document.createElement("option"); o.value = h; o.textContent = h; sel.appendChild(o);
-  });
-  // auto-detect
-  const lower = headers.map(h => String(h).toLowerCase().trim());
+  headers.forEach((h) => { const o = document.createElement("option"); o.value = h; o.textContent = h; sel.appendChild(o); });
+  const lower = headers.map((h) => norm(h));
   let pick = -1;
-  for (const hint of ID_HINTS) {
-    const i = lower.findIndex(h => h === hint);
-    if (i >= 0) { pick = i; break; }
-  }
-  if (pick < 0) for (const hint of ID_HINTS) {
-    const i = lower.findIndex(h => h.includes(hint));
-    if (i >= 0) { pick = i; break; }
-  }
+  for (const hint of ID_HINTS) { const i = lower.findIndex((h) => h === hint); if (i >= 0) { pick = i; break; } }
+  if (pick < 0) for (const hint of ID_HINTS) { const i = lower.findIndex((h) => h.includes(hint)); if (i >= 0) { pick = i; break; } }
   if (pick >= 0) sel.value = headers[pick];
+}
+
+// ---- error banner ----
+function showError(html) { const e = $("error"); e.innerHTML = html; e.classList.remove("hidden"); }
+function clearError() { const e = $("error"); e.innerHTML = ""; e.classList.add("hidden"); }
+
+// ---- schema validation ----
+function validateSchema() {
+  const stored = getSchema();
+  if (!stored) return { ok: true, establish: true };
+  const a = new Set(stored.map(norm));
+  const b = new Set(headers.map(norm));
+  const missing = stored.filter((h) => !b.has(norm(h)));
+  const extra = headers.filter((h) => !a.has(norm(h)));
+  if (missing.length || extra.length) return { ok: false, missing, extra };
+  return { ok: true };
 }
 
 // ---- processing ----
 $("process").addEventListener("click", () => {
+  clearError();
+  if (!headers.length) { showError("This sheet has no readable rows. Check the <strong>Header row</strong> setting."); return; }
+
+  const check = validateSchema();
+  if (!check.ok) {
+    let msg = "<strong>This file doesn't match the format you're tracking.</strong>";
+    if (check.missing.length) msg += "<br>Missing columns: <em>" + check.missing.map(esc).join(", ") + "</em>";
+    if (check.extra.length) msg += "<br>Unexpected columns: <em>" + check.extra.map(esc).join(", ") + "</em>";
+    msg += "<br><span class=\"muted\">Fix the file so columns match, or use <strong>Reset tracked history</strong> to start tracking this new format.</span>";
+    showError(msg);
+    return;
+  }
+  if (check.establish) saveSchema(headers);
+
   const idCol = $("idcol").value;
-  if (!idCol) return;
   const known = getKnown();
-  const seenThisFile = new Set();
+  const seen = new Set();
   const newRows = [], allRows = [];
   rows.forEach((r) => {
     const id = String(r[idCol] ?? "").trim();
     if (!id) return;
-    const isNew = !known.has(id) && !seenThisFile.has(id);
-    seenThisFile.add(id);
-    const tagged = { __new: isNew, data: r };
+    const isNew = !known.has(id) && !seen.has(id);
+    seen.add(id);
+    const tagged = { __new: isNew, id, data: r };
     allRows.push(tagged);
     if (isNew) newRows.push(tagged);
   });
-  // commit new ids to history
-  newRows.forEach(t => known.add(String(t.data[idCol]).trim()));
+  newRows.forEach((t) => known.add(t.id));
   saveKnown(known);
   const meta = getMeta(); meta.lastUpload = Date.now(); saveMeta(meta);
 
   lastResult = { newRows, allRows, idCol };
-  renderResults("new");
+  currentMode = newRows.length ? "new" : "all";
+  renderCards();
   refreshMemo();
 });
 
-function renderResults(mode) {
-  const { newRows, allRows, idCol } = lastResult;
+// ---- rendering cards ----
+function renderCards() {
+  const { newRows, allRows } = lastResult;
   $("s-total").textContent = allRows.length;
   $("s-new").textContent = newRows.length;
   $("s-known").textContent = getKnown().size;
-  const meta = getMeta();
-  $("last-upload").textContent = meta.lastUpload ? "Saved to history just now" : "";
+  $("last-upload").textContent = "New IDs saved to history";
 
-  const data = mode === "new" ? newRows : allRows;
-  const thead = $("tbl").querySelector("thead");
-  const tbody = $("tbl").querySelector("tbody");
-  thead.innerHTML = ""; tbody.innerHTML = "";
-
-  const cols = headers;
-  const trh = document.createElement("tr");
-  trh.appendChild(th(""));
-  cols.forEach(c => trh.appendChild(th(c)));
-  thead.appendChild(trh);
+  const cols = orderedHeaders(headers);
+  const titleCol = cols[0];
+  const subCol = cols[1];
+  const data = currentMode === "new" ? newRows : allRows;
+  const wrap = $("cards");
+  wrap.innerHTML = "";
 
   if (!data.length) {
-    const tr = document.createElement("tr");
-    const td = document.createElement("td");
-    td.colSpan = cols.length + 1;
-    td.className = "muted";
-    td.style.padding = "20px";
-    td.textContent = mode === "new" ? "No new positions in this file. Everything here was seen before." : "No rows.";
-    tr.appendChild(td); tbody.appendChild(tr);
+    const d = document.createElement("div");
+    d.className = "empty";
+    d.textContent = currentMode === "new"
+      ? "No new positions in this file — everything here was seen before."
+      : "No rows found.";
+    wrap.appendChild(d);
     return;
   }
-  data.forEach(t => {
-    const tr = document.createElement("tr");
-    if (t.__new) tr.className = "new";
-    const tag = document.createElement("td");
-    tag.innerHTML = t.__new ? '<span class="badge">NEW</span>' : "";
-    tr.appendChild(tag);
-    cols.forEach(c => {
-      const td = document.createElement("td");
-      td.textContent = t.data[c];
-      tr.appendChild(td);
+
+  const ratings = getRatings();
+  data.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "pos" + (t.__new ? " new" : "");
+
+    const head = document.createElement("div");
+    head.className = "pos-head";
+
+    const left = document.createElement("div");
+    if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
+    const title = document.createElement("div"); title.className = "pos-title"; title.textContent = t.data[titleCol] || "(untitled)"; left.appendChild(title);
+    if (subCol) { const s = document.createElement("div"); s.className = "pos-sub"; s.textContent = t.data[subCol] || ""; left.appendChild(s); }
+    head.appendChild(left);
+
+    const sel = document.createElement("select");
+    sel.className = "rate";
+    RATINGS.forEach((r) => { const o = document.createElement("option"); o.value = r.v; o.textContent = r.t; sel.appendChild(o); });
+    sel.value = ratings[t.id] || "";
+    sel.setAttribute("data-r", sel.value);
+    sel.addEventListener("change", () => {
+      const all = getRatings();
+      if (sel.value) all[t.id] = sel.value; else delete all[t.id];
+      saveRatings(all);
+      sel.setAttribute("data-r", sel.value);
     });
-    tbody.appendChild(tr);
+    head.appendChild(sel);
+    card.appendChild(head);
+
+    const fields = document.createElement("div");
+    fields.className = "fields";
+    cols.forEach((c) => {
+      const f = document.createElement("div"); f.className = "field";
+      const k = document.createElement("span"); k.className = "k"; k.textContent = c;
+      const v = document.createElement("span"); v.className = "v"; v.textContent = t.data[c];
+      f.appendChild(k); f.appendChild(v); fields.appendChild(f);
+    });
+    card.appendChild(fields);
+    wrap.appendChild(card);
   });
   $("results").classList.remove("hidden");
 }
 
-function th(text){ const e=document.createElement("th"); e.textContent=text; return e; }
+$("view-new").addEventListener("click", () => { currentMode = "new"; renderCards(); });
+$("view-all").addEventListener("click", () => { currentMode = "all"; renderCards(); });
 
-$("view-new").addEventListener("click", () => renderResults("new"));
-$("view-all").addEventListener("click", () => renderResults("all"));
-
+// ---- export ----
 $("export").addEventListener("click", () => {
-  if (!lastResult || !lastResult.newRows.length) return;
-  const cols = headers;
-  const lines = [cols.map(csv).join(",")];
-  lastResult.newRows.forEach(t => lines.push(cols.map(c => csv(t.data[c])).join(",")));
+  if (!lastResult) return;
+  const data = currentMode === "new" ? lastResult.newRows : lastResult.allRows;
+  if (!data.length) return;
+  const ratings = getRatings();
+  const cols = orderedHeaders(headers);
+  const head = [...cols, "Rating", "Rating Label"];
+  const labelOf = (v) => (RATINGS.find((r) => r.v === v) || {}).t || "";
+  const lines = [head.map(csv).join(",")];
+  data.forEach((t) => {
+    const rv = ratings[t.id] || "";
+    const line = [...cols.map((c) => csv(t.data[c])), csv(rv), csv(labelOf(rv).replace(/^[0-9]+ · /, ""))];
+    lines.push(line.join(","));
+  });
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = "new-positions.csv";
+  a.download = (currentMode === "new" ? "new-positions" : "all-positions") + ".csv";
   a.click();
 });
-function csv(v){ v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+function csv(v) { v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+function esc(v) { return String(v ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
 
+// ---- reset ----
 $("reset").addEventListener("click", () => {
-  if (!confirm("Clear all tracked position history? The next upload will treat every position as new.")) return;
+  if (!confirm("Clear tracked position history and the locked file format? Ratings are kept. The next upload will treat every position as new and set a new format.")) return;
   localStorage.removeItem(STORE_KEY);
   localStorage.removeItem(META_KEY);
+  localStorage.removeItem(SCHEMA_KEY);
   refreshMemo();
-  if (lastResult) { $("s-known").textContent = "0"; }
+  $("s-known").textContent = "0";
 });
 
 refreshMemo();
