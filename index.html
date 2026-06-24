@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Position Tracker</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+  :root {
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --panel-2: #273449;
+    --border: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --new: #22c55e;
+    --new-bg: rgba(34, 197, 94, 0.12);
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 28px 24px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  h1 { margin: 0; font-size: 22px; }
+  .sub { color: var(--muted); margin-top: 4px; font-size: 14px; }
+  main { max-width: 1000px; margin: 0 auto; padding: 24px; }
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 20px;
+  }
+  #drop {
+    border: 2px dashed var(--border);
+    border-radius: 12px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .15s, background .15s;
+    color: var(--muted);
+  }
+  #drop.drag { border-color: var(--accent); background: var(--panel-2); color: var(--text); }
+  #drop strong { color: var(--text); }
+  .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  label { font-size: 13px; color: var(--muted); }
+  select, button {
+    font: inherit;
+    background: var(--panel-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+  }
+  button { cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: #06283d; border-color: var(--accent); font-weight: 600; }
+  button.danger { color: var(--danger); }
+  .stats { display: flex; gap: 24px; flex-wrap: wrap; }
+  .stat { }
+  .stat .num { font-size: 28px; font-weight: 700; }
+  .stat.new .num { color: var(--new); }
+  .stat .lbl { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  tr.new td { background: var(--new-bg); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; color: var(--new); border: 1px solid var(--new); border-radius: 999px; padding: 1px 8px; }
+  .table-wrap { max-height: 480px; overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+  .hidden { display: none; }
+  .muted { color: var(--muted); font-size: 13px; }
+  .toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin: 4px 0 16px; }
+  .pill { font-size: 12px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 6px; }
+  a.link { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Position Tracker</h1>
+  <div class="sub">Upload an Excel file of positions. New ones — those not seen in any earlier upload — are flagged.</div>
+</header>
+<main>
+
+  <div class="card">
+    <div id="drop">
+      <p><strong>Drop an Excel file here</strong> or click to browse</p>
+      <p class="muted">.xlsx, .xls, or .csv</p>
+    </div>
+    <input id="file" type="file" accept=".xlsx,.xls,.csv" class="hidden" />
+  </div>
+
+  <div id="config" class="card hidden">
+    <div class="row">
+      <div>
+        <label for="idcol">Match positions by column</label><br />
+        <select id="idcol"></select>
+      </div>
+      <div>
+        <label for="sheet">Sheet</label><br />
+        <select id="sheet"></select>
+      </div>
+      <div style="align-self:flex-end">
+        <button id="process" class="primary">Find new positions</button>
+      </div>
+    </div>
+    <div class="hint">The match column should hold a unique value per position (e.g. Job ID or Req #). Auto-detected when possible.</div>
+  </div>
+
+  <div id="results" class="card hidden">
+    <div class="stats" style="margin-bottom:16px">
+      <div class="stat"><div class="num" id="s-total">0</div><div class="lbl">Rows in file</div></div>
+      <div class="stat new"><div class="num" id="s-new">0</div><div class="lbl">New positions</div></div>
+      <div class="stat"><div class="num" id="s-known">0</div><div class="lbl">Tracked total</div></div>
+    </div>
+    <div class="toolbar">
+      <button id="view-new" class="primary">New only</button>
+      <button id="view-all">Show all rows</button>
+      <button id="export" >Export new (CSV)</button>
+      <span class="pill" id="last-upload"></span>
+    </div>
+    <div class="table-wrap">
+      <table id="tbl"><thead></thead><tbody></tbody></table>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="row" style="justify-content:space-between">
+      <div class="muted" id="memo">No positions tracked yet.</div>
+      <button id="reset" class="danger">Reset tracked history</button>
+    </div>
+    <div class="hint">History is stored in this browser only. Resetting means the next upload treats every position as new.</div>
+  </div>
+
+</main>
+
+<script>
+const STORE_KEY = "positionTracker.knownIds.v1";
+const META_KEY  = "positionTracker.meta.v1";
+
+let workbook = null;
+let rows = [];          // current sheet rows (array of objects)
+let headers = [];       // current sheet headers
+let lastResult = null;  // { newRows, allRows, idCol }
+
+const $ = (id) => document.getElementById(id);
+
+function getKnown() {
+  try { return new Set(JSON.parse(localStorage.getItem(STORE_KEY) || "[]")); }
+  catch { return new Set(); }
+}
+function saveKnown(set) {
+  localStorage.setItem(STORE_KEY, JSON.stringify([...set]));
+}
+function getMeta() {
+  try { return JSON.parse(localStorage.getItem(META_KEY) || "{}"); }
+  catch { return {}; }
+}
+function saveMeta(m) { localStorage.setItem(META_KEY, JSON.stringify(m)); }
+
+function refreshMemo() {
+  const n = getKnown().size;
+  const meta = getMeta();
+  const when = meta.lastUpload ? new Date(meta.lastUpload).toLocaleString() : null;
+  $("memo").textContent = n === 0
+    ? "No positions tracked yet."
+    : `${n} position${n===1?"":"s"} tracked` + (when ? ` · last upload ${when}` : "");
+}
+
+// ---- file handling ----
+const drop = $("drop"), fileInput = $("file");
+drop.addEventListener("click", () => fileInput.click());
+drop.addEventListener("dragover", (e) => { e.preventDefault(); drop.classList.add("drag"); });
+drop.addEventListener("dragleave", () => drop.classList.remove("drag"));
+drop.addEventListener("drop", (e) => {
+  e.preventDefault(); drop.classList.remove("drag");
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener("change", (e) => {
+  if (e.target.files.length) handleFile(e.target.files[0]);
+});
+
+function handleFile(file) {
+  const reader = new FileReader();
+  reader.onload = (ev) => {
+    workbook = XLSX.read(ev.target.result, { type: "array" });
+    populateSheets();
+    $("config").classList.remove("hidden");
+    $("results").classList.add("hidden");
+    drop.querySelector("strong").textContent = file.name;
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function populateSheets() {
+  const sel = $("sheet");
+  sel.innerHTML = "";
+  workbook.SheetNames.forEach((name) => {
+    const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o);
+  });
+  sel.onchange = loadSheet;
+  loadSheet();
+}
+
+function loadSheet() {
+  const name = $("sheet").value;
+  const ws = workbook.Sheets[name];
+  rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  headers = rows.length ? Object.keys(rows[0]) : [];
+  populateIdCol();
+}
+
+const ID_HINTS = ["job id","jobid","req id","reqid","requisition","req #","req#","req number","position id","posting id","id","jobcode","job code","reference","ref"];
+function populateIdCol() {
+  const sel = $("idcol");
+  sel.innerHTML = "";
+  headers.forEach((h) => {
+    const o = document.createElement("option"); o.value = h; o.textContent = h; sel.appendChild(o);
+  });
+  // auto-detect
+  const lower = headers.map(h => String(h).toLowerCase().trim());
+  let pick = -1;
+  for (const hint of ID_HINTS) {
+    const i = lower.findIndex(h => h === hint);
+    if (i >= 0) { pick = i; break; }
+  }
+  if (pick < 0) for (const hint of ID_HINTS) {
+    const i = lower.findIndex(h => h.includes(hint));
+    if (i >= 0) { pick = i; break; }
+  }
+  if (pick >= 0) sel.value = headers[pick];
+}
+
+// ---- processing ----
+$("process").addEventListener("click", () => {
+  const idCol = $("idcol").value;
+  if (!idCol) return;
+  const known = getKnown();
+  const seenThisFile = new Set();
+  const newRows = [], allRows = [];
+  rows.forEach((r) => {
+    const id = String(r[idCol] ?? "").trim();
+    if (!id) return;
+    const isNew = !known.has(id) && !seenThisFile.has(id);
+    seenThisFile.add(id);
+    const tagged = { __new: isNew, data: r };
+    allRows.push(tagged);
+    if (isNew) newRows.push(tagged);
+  });
+  // commit new ids to history
+  newRows.forEach(t => known.add(String(t.data[idCol]).trim()));
+  saveKnown(known);
+  const meta = getMeta(); meta.lastUpload = Date.now(); saveMeta(meta);
+
+  lastResult = { newRows, allRows, idCol };
+  renderResults("new");
+  refreshMemo();
+});
+
+function renderResults(mode) {
+  const { newRows, allRows, idCol } = lastResult;
+  $("s-total").textContent = allRows.length;
+  $("s-new").textContent = newRows.length;
+  $("s-known").textContent = getKnown().size;
+  const meta = getMeta();
+  $("last-upload").textContent = meta.lastUpload ? "Saved to history just now" : "";
+
+  const data = mode === "new" ? newRows : allRows;
+  const thead = $("tbl").querySelector("thead");
+  const tbody = $("tbl").querySelector("tbody");
+  thead.innerHTML = ""; tbody.innerHTML = "";
+
+  const cols = headers;
+  const trh = document.createElement("tr");
+  trh.appendChild(th(""));
+  cols.forEach(c => trh.appendChild(th(c)));
+  thead.appendChild(trh);
+
+  if (!data.length) {
+    const tr = document.createElement("tr");
+    const td = document.createElement("td");
+    td.colSpan = cols.length + 1;
+    td.className = "muted";
+    td.style.padding = "20px";
+    td.textContent = mode === "new" ? "No new positions in this file. Everything here was seen before." : "No rows.";
+    tr.appendChild(td); tbody.appendChild(tr);
+    return;
+  }
+  data.forEach(t => {
+    const tr = document.createElement("tr");
+    if (t.__new) tr.className = "new";
+    const tag = document.createElement("td");
+    tag.innerHTML = t.__new ? '<span class="badge">NEW</span>' : "";
+    tr.appendChild(tag);
+    cols.forEach(c => {
+      const td = document.createElement("td");
+      td.textContent = t.data[c];
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  });
+  $("results").classList.remove("hidden");
+}
+
+function th(text){ const e=document.createElement("th"); e.textContent=text; return e; }
+
+$("view-new").addEventListener("click", () => renderResults("new"));
+$("view-all").addEventListener("click", () => renderResults("all"));
+
+$("export").addEventListener("click", () => {
+  if (!lastResult || !lastResult.newRows.length) return;
+  const cols = headers;
+  const lines = [cols.map(csv).join(",")];
+  lastResult.newRows.forEach(t => lines.push(cols.map(c => csv(t.data[c])).join(",")));
+  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "new-positions.csv";
+  a.click();
+});
+function csv(v){ v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace(/"/g,'""') + '"' : v; }
+
+$("reset").addEventListener("click", () => {
+  if (!confirm("Clear all tracked position history? The next upload will treat every position as new.")) return;
+  localStorage.removeItem(STORE_KEY);
+  localStorage.removeItem(META_KEY);
+  refreshMemo();
+  if (lastResult) { $("s-known").textContent = "0"; }
+});
+
+refreshMemo();
+</script>
+</body>
+</html>
