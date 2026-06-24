@@ -332,7 +332,7 @@ $("process").addEventListener("click", () => {
   const meta = getMeta(); meta.lastUpload = Date.now(); saveMeta(meta);
 
   lastResult = { newRows, allRows, idCol };
-  currentMode = newRows.length ? "new" : "all";
+  currentMode = "all";
   renderCards();
   refreshMemo();
 });
@@ -348,7 +348,9 @@ function renderCards() {
   const cols = orderedHeaders(headers);
   const titleCol = cols[0];
   const subCol = cols[1];
-  const data = currentMode === "new" ? newRows : allRows;
+  // "all" view: new entries first, then pre-existing in file order
+  const existingRows = allRows.filter((t) => !t.__new);
+  const data = currentMode === "new" ? newRows : [...newRows, ...existingRows];
   const wrap = $("cards");
   wrap.innerHTML = "";
 
