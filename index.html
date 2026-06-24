@@ -90,17 +90,22 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 14px 16px;
+    cursor: pointer;
+    transition: border-color .12s, transform .06s;
   }
+  .pos:hover { border-color: var(--accent); }
+  .pos:active { transform: scale(.997); }
   .pos.new { border-color: var(--new); background: var(--new-bg); }
+  .pos.new:hover { border-color: #86efac; }
   .pos-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
   .pos-title { font-size: 15px; font-weight: 700; }
-  .pos-sub { font-size: 12px; color: var(--muted); }
   .badge { display: inline-block; font-size: 10px; font-weight: 700; color: var(--new); border: 1px solid var(--new); border-radius: 999px; padding: 1px 7px; margin-bottom: 6px; }
   .fields { display: grid; gap: 4px; }
   .field { display: grid; grid-template-columns: 120px 1fr; gap: 8px; font-size: 13px; border-top: 1px solid var(--border); padding-top: 4px; }
   .field:first-child { border-top: none; padding-top: 0; }
   .field .k { color: var(--muted); }
   .field .v { word-break: break-word; }
+  .more { font-size: 12px; color: var(--accent); margin-top: 10px; }
   .rate { padding: 5px 8px; font-size: 12px; max-width: 170px; }
   .rate[data-r="5"] { border-color: #22c55e; color: #4ade80; }
   .rate[data-r="4"] { border-color: #84cc16; color: #a3e635; }
@@ -108,12 +113,24 @@
   .rate[data-r="2"] { border-color: #f97316; color: #fb923c; }
   .rate[data-r="1"] { border-color: #ef4444; color: #f87171; }
   .empty { color: var(--muted); padding: 20px; }
+
+  /* detail modal */
+  #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; z-index: 50; }
+  #overlay.hidden { display: none; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; max-width: 660px; width: 100%; padding: 22px; }
+  .modal.new { border-color: var(--new); }
+  .modal-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 16px; }
+  .modal-title { font-size: 18px; font-weight: 700; }
+  .modal-actions { display: flex; align-items: center; gap: 10px; }
+  .close { background: transparent; border: none; color: var(--muted); font-size: 24px; line-height: 1; cursor: pointer; padding: 0 4px; }
+  .close:hover { color: var(--text); }
+  .modal .field { grid-template-columns: 160px 1fr; padding: 6px 0; }
 </style>
 </head>
 <body>
 <header>
   <h1>Position Tracker</h1>
-  <div class="sub">Upload an Excel file of positions. New ones — not seen in any earlier upload — are flagged, and you can rate each.</div>
+  <div class="sub">Upload an Excel file of positions. New ones — not seen in any earlier upload — are flagged. Click a card for full details.</div>
 </header>
 <main>
 
@@ -143,7 +160,7 @@
         <button id="process" class="primary">Find new positions</button>
       </div>
     </div>
-    <div class="hint">The match column should hold a unique value per position. Set <strong>Header row</strong> if your column titles aren't on the first row.</div>
+    <div class="hint">Set <strong>Header row</strong> if your column titles aren't on the first row. Files must contain exactly the expected columns or they'll be rejected.</div>
     <div id="error" class="hidden"></div>
   </div>
 
@@ -167,18 +184,29 @@
       <div class="muted" id="memo">No positions tracked yet.</div>
       <button id="reset" class="danger">Reset tracked history</button>
     </div>
-    <div class="hint">Positions, history, and ratings are stored in this browser only. Resetting clears tracked positions and the expected file format (ratings are kept).</div>
+    <div class="hint">Positions, history, and ratings are stored in this browser only. Resetting clears tracked positions (ratings are kept).</div>
   </div>
 
 </main>
 
+<div id="overlay" class="hidden"><div class="modal" id="modal"></div></div>
+
 <script>
 const POS_KEY    = "positionTracker.positions.v2";  // [{id, data}]
 const META_KEY   = "positionTracker.meta.v1";
-const SCHEMA_KEY = "positionTracker.schema.v1";
 const RATING_KEY = "positionTracker.ratings.v1";
 
-const PRIORITY = ["Billet Title", "Unit Name", "NRA Title", "AUIC Title", "Drill State"];
+// Canonical structure — a file must contain exactly these columns to be accepted.
+const EXPECTED_COLUMNS = [
+  "Billet Title", "Unit Name", "NRA Title", "AUIC Title", "Drill State",
+  "BIN", "CMD", "Desig", "PanelCommunity", "Grade", "VRFAS", "HRFAS", "Sex",
+  "RUIC", "AUIC", "NRA", "RPC", "RPC Description", "Assignment Type",
+  "Primary AQD", "Primary SSP", "Advertised", "REDCOM", "REDCOM Title",
+  "End Date", "PRD", "Tenure",
+];
+// Fields shown on the compact card (everything else lives in the detail popup).
+const SUMMARY_COLS = ["Billet Title", "Unit Name", "NRA Title", "AUIC Title", "Drill State", "BIN", "Grade"];
+
 const RATINGS = [
   { v: "",  t: "— Rate —" },
   { v: "5", t: "5 · Top option" },
@@ -195,14 +223,17 @@ let currentMode = "all";
 
 const $ = (id) => document.getElementById(id);
 const norm = (s) => String(s).toLowerCase().replace(/\s+/g, " ").trim();
+const valueFor = (data, col) => {
+  if (col in data) return data[col];
+  const k = Object.keys(data).find((k) => norm(k) === norm(col));
+  return k !== undefined ? data[k] : "";
+};
 
 // ---- storage ----
 function getPositions() { try { return JSON.parse(localStorage.getItem(POS_KEY) || "[]"); } catch { return []; } }
 function savePositions(a) { localStorage.setItem(POS_KEY, JSON.stringify(a)); }
 function getMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || "{}"); } catch { return {}; } }
 function saveMeta(m) { localStorage.setItem(META_KEY, JSON.stringify(m)); }
-function getSchema() { try { return JSON.parse(localStorage.getItem(SCHEMA_KEY) || "null"); } catch { return null; } }
-function saveSchema(h) { localStorage.setItem(SCHEMA_KEY, JSON.stringify(h)); }
 function getRatings() { try { return JSON.parse(localStorage.getItem(RATING_KEY) || "{}"); } catch { return {}; } }
 function saveRatings(r) { localStorage.setItem(RATING_KEY, JSON.stringify(r)); }
 
@@ -210,19 +241,12 @@ function refreshMemo() {
   const n = getPositions().length;
   const meta = getMeta();
   const when = meta.lastUpload ? new Date(meta.lastUpload).toLocaleString() : null;
-  const schema = getSchema();
-  let txt = n === 0 ? "No positions tracked yet." : `${n} position${n===1?"":"s"} tracked` + (when ? ` · last upload ${when}` : "");
-  if (schema) txt += ` · format locked to ${schema.length} columns`;
-  $("memo").textContent = txt;
+  $("memo").textContent = n === 0 ? "No positions tracked yet." : `${n} position${n===1?"":"s"} tracked` + (when ? ` · last upload ${when}` : "");
 }
 
-// ---- column ordering ----
 function orderedHeaders(hs) {
   const present = [];
-  PRIORITY.forEach((p) => {
-    const found = hs.find((h) => norm(h) === norm(p));
-    if (found && !present.includes(found)) present.push(found);
-  });
+  SUMMARY_COLS.forEach((p) => { const f = hs.find((h) => norm(h) === norm(p)); if (f && !present.includes(f)) present.push(f); });
   const rest = hs.filter((h) => !present.includes(h));
   return [...present, ...rest];
 }
@@ -264,7 +288,7 @@ function loadSheet() {
   populateIdCol();
 }
 
-const ID_HINTS = ["job id","jobid","req id","reqid","requisition","req #","req#","req number","position id","posting id","billet id","auic","id","reference","ref"];
+const ID_HINTS = ["bin", "billet id", "job id", "req id", "requisition", "position id", "id"];
 function populateIdCol() {
   const sel = $("idcol");
   sel.innerHTML = "";
@@ -281,16 +305,13 @@ function showError(html) { const e = $("error"); e.innerHTML = html; e.classList
 function clearError() { const e = $("error"); e.innerHTML = ""; e.classList.add("hidden"); }
 function esc(v) { return String(v ?? "").replace(/[<>&]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c])); }
 
-// ---- schema validation ----
+// ---- schema validation against the canonical columns ----
 function validateSchema() {
-  const stored = getSchema();
-  if (!stored) return { ok: true, establish: true };
-  const a = new Set(stored.map(norm));
+  const a = new Set(EXPECTED_COLUMNS.map(norm));
   const b = new Set(headers.map(norm));
-  const missing = stored.filter((h) => !b.has(norm(h)));
+  const missing = EXPECTED_COLUMNS.filter((h) => !b.has(norm(h)));
   const extra = headers.filter((h) => !a.has(norm(h)));
-  if (missing.length || extra.length) return { ok: false, missing, extra };
-  return { ok: true };
+  return { ok: !missing.length && !extra.length, missing, extra };
 }
 
 // ---- processing an upload ----
@@ -300,14 +321,13 @@ $("process").addEventListener("click", () => {
 
   const check = validateSchema();
   if (!check.ok) {
-    let msg = "<strong>This file doesn't match the format you're tracking.</strong>";
+    let msg = "<strong>This file doesn't match the required position format and was not imported.</strong>";
     if (check.missing.length) msg += "<br>Missing columns: <em>" + check.missing.map(esc).join(", ") + "</em>";
     if (check.extra.length) msg += "<br>Unexpected columns: <em>" + check.extra.map(esc).join(", ") + "</em>";
-    msg += "<br><span class=\"muted\">Fix the file so columns match, or use <strong>Reset tracked history</strong> to track this new format.</span>";
+    msg += "<br><span class=\"muted\">Check the <strong>Header row</strong> setting, or fix the file so its columns match the expected structure.</span>";
     showError(msg);
     return;
   }
-  if (check.establish) saveSchema(headers);
 
   const idCol = $("idcol").value;
   const positions = getPositions();
@@ -319,7 +339,7 @@ $("process").addEventListener("click", () => {
     if (!id || seen.has(id)) return;
     seen.add(id);
     if (index.has(id)) {
-      positions[index.get(id)].data = r; // refresh details
+      positions[index.get(id)].data = r;
     } else {
       positions.push({ id, data: r });
       index.set(id, positions.length - 1);
@@ -337,115 +357,145 @@ $("process").addEventListener("click", () => {
   refreshMemo();
 });
 
-// ---- render (works on upload AND on page load) ----
-function render() {
+// ---- build the sorted, tagged list shared by render + export ----
+function buildList() {
   const positions = getPositions();
-  const schema = getSchema();
-  if (!positions.length || !schema) { $("results").classList.add("hidden"); return; }
-
   const meta = getMeta();
   const newIds = new Set(meta.lastNewIds || []);
   const ratings = getRatings();
-  const cols = orderedHeaders(schema);
-  const titleCol = cols[0], subCol = cols[1];
-
-  // stats
-  $("s-total").textContent = positions.length;
-  $("s-new").textContent = newIds.size;
-  $("s-rated").textContent = positions.filter((p) => ratings[p.id]).length;
-  $("last-upload").textContent = meta.lastUpload ? "Last upload " + new Date(meta.lastUpload).toLocaleString() : "";
-
-  // tag + filter
-  let tagged = positions.map((p, i) => ({ id: p.id, data: p.data, __new: newIds.has(p.id), i }));
-  if (currentMode === "new") tagged = tagged.filter((t) => t.__new);
-
-  // sort: Unrated -> 5 -> 4 -> 3 -> 2 -> 1; ties keep new-on-top, then original order
   const rankOf = (v) => (v ? 6 - Number(v) : 0);
-  tagged.sort((a, b) => {
-    const ra = rankOf(ratings[a.id]), rb = rankOf(ratings[b.id]);
-    if (ra !== rb) return ra - rb;
-    if (a.__new !== b.__new) return a.__new ? -1 : 1;
-    return a.i - b.i;
-  });
-
-  const wrap = $("cards");
-  wrap.innerHTML = "";
-  $("results").classList.remove("hidden");
-
-  if (!tagged.length) {
-    const d = document.createElement("div");
-    d.className = "empty";
-    d.textContent = currentMode === "new" ? "No new positions in the last upload." : "No positions tracked yet.";
-    wrap.appendChild(d);
-    return;
-  }
-
-  tagged.forEach((t) => {
-    const card = document.createElement("div");
-    card.className = "pos" + (t.__new ? " new" : "");
-
-    const head = document.createElement("div"); head.className = "pos-head";
-    const left = document.createElement("div");
-    if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
-    const title = document.createElement("div"); title.className = "pos-title"; title.textContent = t.data[titleCol] || "(untitled)"; left.appendChild(title);
-    if (subCol) { const s = document.createElement("div"); s.className = "pos-sub"; s.textContent = t.data[subCol] || ""; left.appendChild(s); }
-    head.appendChild(left);
-
-    const sel = document.createElement("select");
-    sel.className = "rate";
-    RATINGS.forEach((r) => { const o = document.createElement("option"); o.value = r.v; o.textContent = r.t; sel.appendChild(o); });
-    sel.value = ratings[t.id] || "";
-    sel.setAttribute("data-r", sel.value);
-    sel.addEventListener("change", () => {
-      const all = getRatings();
-      if (sel.value) all[t.id] = sel.value; else delete all[t.id];
-      saveRatings(all);
-      render(); // auto re-sort + refresh "Rated" count
-    });
-    head.appendChild(sel);
-    card.appendChild(head);
-
-    const fields = document.createElement("div"); fields.className = "fields";
-    cols.forEach((c) => {
-      const f = document.createElement("div"); f.className = "field";
-      const k = document.createElement("span"); k.className = "k"; k.textContent = c;
-      const v = document.createElement("span"); v.className = "v"; v.textContent = t.data[c];
-      f.appendChild(k); f.appendChild(v); fields.appendChild(f);
-    });
-    card.appendChild(fields);
-    wrap.appendChild(card);
-  });
-}
-
-$("view-all").addEventListener("click", () => { currentMode = "all"; render(); });
-$("view-new").addEventListener("click", () => { currentMode = "new"; render(); });
-
-// ---- export ----
-$("export").addEventListener("click", () => {
-  const positions = getPositions();
-  const schema = getSchema();
-  if (!positions.length || !schema) return;
-  const meta = getMeta();
-  const newIds = new Set(meta.lastNewIds || []);
-  const ratings = getRatings();
-  const cols = orderedHeaders(schema);
-  const rankOf = (v) => (v ? 6 - Number(v) : 0);
-  const labelOf = (v) => ((RATINGS.find((r) => r.v === v) || {}).t || "").replace(/^[0-9]+ · /, "");
-
-  let list = positions.map((p, i) => ({ ...p, __new: newIds.has(p.id), i }));
-  if (currentMode === "new") list = list.filter((p) => p.__new);
+  let list = positions.map((p, i) => ({ id: p.id, data: p.data, __new: newIds.has(p.id), i }));
+  if (currentMode === "new") list = list.filter((t) => t.__new);
   list.sort((a, b) => {
     const ra = rankOf(ratings[a.id]), rb = rankOf(ratings[b.id]);
     if (ra !== rb) return ra - rb;
     if (a.__new !== b.__new) return a.__new ? -1 : 1;
     return a.i - b.i;
   });
+  return list;
+}
 
+// ---- render ----
+function render() {
+  const positions = getPositions();
+  if (!positions.length) { $("results").classList.add("hidden"); return; }
+
+  const meta = getMeta();
+  const newIds = new Set(meta.lastNewIds || []);
+  const ratings = getRatings();
+
+  $("s-total").textContent = positions.length;
+  $("s-new").textContent = newIds.size;
+  $("s-rated").textContent = positions.filter((p) => ratings[p.id]).length;
+  $("last-upload").textContent = meta.lastUpload ? "Last upload " + new Date(meta.lastUpload).toLocaleString() : "";
+
+  const list = buildList();
+  const wrap = $("cards");
+  wrap.innerHTML = "";
+  $("results").classList.remove("hidden");
+
+  if (!list.length) {
+    const d = document.createElement("div"); d.className = "empty";
+    d.textContent = currentMode === "new" ? "No new positions in the last upload." : "No positions tracked yet.";
+    wrap.appendChild(d);
+    return;
+  }
+
+  const bodyCols = SUMMARY_COLS.filter((c) => norm(c) !== norm("Billet Title"));
+  list.forEach((t) => {
+    const card = document.createElement("div");
+    card.className = "pos" + (t.__new ? " new" : "");
+    card.title = "Click for full details";
+
+    const head = document.createElement("div"); head.className = "pos-head";
+    const left = document.createElement("div");
+    if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
+    const title = document.createElement("div"); title.className = "pos-title"; title.textContent = valueFor(t.data, "Billet Title") || "(untitled)"; left.appendChild(title);
+    head.appendChild(left);
+    head.appendChild(makeRate(t, ratings));
+    card.appendChild(head);
+
+    const fields = document.createElement("div"); fields.className = "fields";
+    bodyCols.forEach((c) => fields.appendChild(makeField(c, valueFor(t.data, c))));
+    card.appendChild(fields);
+
+    const more = document.createElement("div"); more.className = "more"; more.textContent = "View all details →";
+    card.appendChild(more);
+
+    card.addEventListener("click", (e) => { if (e.target.closest(".rate")) return; openModal(t); });
+    wrap.appendChild(card);
+  });
+}
+
+function makeField(k, v) {
+  const f = document.createElement("div"); f.className = "field";
+  const ks = document.createElement("span"); ks.className = "k"; ks.textContent = k;
+  const vs = document.createElement("span"); vs.className = "v"; vs.textContent = v;
+  f.appendChild(ks); f.appendChild(vs);
+  return f;
+}
+
+function makeRate(t, ratings) {
+  const sel = document.createElement("select");
+  sel.className = "rate";
+  RATINGS.forEach((r) => { const o = document.createElement("option"); o.value = r.v; o.textContent = r.t; sel.appendChild(o); });
+  sel.value = ratings[t.id] || "";
+  sel.setAttribute("data-r", sel.value);
+  sel.addEventListener("click", (e) => e.stopPropagation());
+  sel.addEventListener("change", () => {
+    const all = getRatings();
+    if (sel.value) all[t.id] = sel.value; else delete all[t.id];
+    saveRatings(all);
+    render();
+  });
+  return sel;
+}
+
+// ---- detail modal ----
+function openModal(t) {
+  const ratings = getRatings();
+  const modal = $("modal");
+  modal.className = "modal" + (t.__new ? " new" : "");
+  modal.innerHTML = "";
+
+  const head = document.createElement("div"); head.className = "modal-head";
+  const left = document.createElement("div");
+  if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
+  const title = document.createElement("div"); title.className = "modal-title"; title.textContent = valueFor(t.data, "Billet Title") || "(untitled)"; left.appendChild(title);
+  head.appendChild(left);
+
+  const actions = document.createElement("div"); actions.className = "modal-actions";
+  actions.appendChild(makeRate(t, ratings));
+  const x = document.createElement("button"); x.className = "close"; x.innerHTML = "&times;"; x.title = "Close"; x.addEventListener("click", closeModal);
+  actions.appendChild(x);
+  head.appendChild(actions);
+  modal.appendChild(head);
+
+  const fields = document.createElement("div"); fields.className = "fields";
+  EXPECTED_COLUMNS.forEach((c) => fields.appendChild(makeField(c, valueFor(t.data, c))));
+  modal.appendChild(fields);
+
+  $("overlay").classList.remove("hidden");
+}
+function closeModal() { $("overlay").classList.add("hidden"); }
+$("overlay").addEventListener("click", (e) => { if (e.target.id === "overlay") closeModal(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+
+$("view-all").addEventListener("click", () => { currentMode = "all"; render(); });
+$("view-new").addEventListener("click", () => { currentMode = "new"; render(); });
+
+// ---- export ----
+$("export").addEventListener("click", () => {
+  const list = buildList();
+  if (!list.length) return;
+  const ratings = getRatings();
+  const cols = EXPECTED_COLUMNS;
+  const labelOf = (v) => ((RATINGS.find((r) => r.v === v) || {}).t || "").replace(/^[0-9]+ · /, "");
   const head = ["New?", ...cols, "Rating", "Rating Label"];
   const lines = [head.map(csv).join(",")];
-  list.forEach((p) => {
-    const rv = ratings[p.id] || "";
-    lines.push([csv(p.__new ? "NEW" : ""), ...cols.map((c) => csv(p.data[c])), csv(rv), csv(labelOf(rv))].join(","));
+  list.forEach((t) => {
+    const rv = ratings[t.id] || "";
+    lines.push([csv(t.__new ? "NEW" : ""), ...cols.map((c) => csv(valueFor(t.data, c))), csv(rv), csv(labelOf(rv))].join(","));
   });
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
@@ -457,15 +507,14 @@ function csv(v) { v = String(v ?? ""); return /[",\n]/.test(v) ? '"' + v.replace
 
 // ---- reset ----
 $("reset").addEventListener("click", () => {
-  if (!confirm("Clear all tracked positions and the locked file format? Ratings are kept. The next upload starts fresh.")) return;
+  if (!confirm("Clear all tracked positions? Ratings are kept. The next upload starts fresh.")) return;
   localStorage.removeItem(POS_KEY);
   localStorage.removeItem(META_KEY);
-  localStorage.removeItem(SCHEMA_KEY);
   refreshMemo();
   render();
 });
 
-// ---- init on load ----
+// ---- init ----
 refreshMemo();
 render();
 </script>
