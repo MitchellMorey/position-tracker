@@ -53,7 +53,7 @@
   #drop strong { color: var(--text); }
   .row { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
   label { font-size: 13px; color: var(--muted); }
-  select, button {
+  select, button, input[type="number"] {
     font: inherit;
     background: var(--panel-2);
     color: var(--text);
@@ -109,11 +109,15 @@
         <label for="sheet">Sheet</label><br />
         <select id="sheet"></select>
       </div>
+      <div>
+        <label for="headerrow">Header row</label><br />
+        <input id="headerrow" type="number" min="1" value="1" style="width:80px" />
+      </div>
       <div style="align-self:flex-end">
         <button id="process" class="primary">Find new positions</button>
       </div>
     </div>
-    <div class="hint">The match column should hold a unique value per position (e.g. Job ID or Req #). Auto-detected when possible.</div>
+    <div class="hint">The match column should hold a unique value per position (e.g. Job ID or Req #). Auto-detected when possible. Set <strong>Header row</strong> if your column titles aren't on the first row.</div>
   </div>
 
   <div id="results" class="card hidden">
@@ -208,13 +212,16 @@ function populateSheets() {
     const o = document.createElement("option"); o.value = name; o.textContent = name; sel.appendChild(o);
   });
   sel.onchange = loadSheet;
+  $("headerrow").onchange = loadSheet;
   loadSheet();
 }
 
 function loadSheet() {
   const name = $("sheet").value;
   const ws = workbook.Sheets[name];
-  rows = XLSX.utils.sheet_to_json(ws, { defval: "" });
+  const headerRow = Math.max(1, parseInt($("headerrow").value, 10) || 1);
+  // SheetJS range is 0-based; passing the header row index makes that row the headers
+  rows = XLSX.utils.sheet_to_json(ws, { defval: "", range: headerRow - 1 });
   headers = rows.length ? Object.keys(rows[0]) : [];
   populateIdCol();
 }
