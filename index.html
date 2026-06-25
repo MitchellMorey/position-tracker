@@ -112,6 +112,8 @@
   .field .v { word-break: break-word; }
   .more { font-size: 12px; color: var(--accent); margin-top: 10px; }
   .rate { padding: 5px 8px; font-size: 12px; max-width: 170px; }
+  .rate-row { margin-bottom: 12px; }
+  .rate-row .rate { width: 100%; max-width: none; }
   .rate[data-r="5"] { border-color: #22c55e; color: #4ade80; }
   .rate[data-r="4"] { border-color: #84cc16; color: #a3e635; }
   .rate[data-r="3"] { border-color: #eab308; color: #facc15; }
@@ -503,8 +505,11 @@ function render() {
     else if (t.__dropped) { const b = document.createElement("div"); b.className = "badge drop"; b.textContent = "DROPPED OFF"; left.appendChild(b); }
     const title = document.createElement("div"); title.className = "pos-title"; title.textContent = valueFor(t.data, "Billet Title") || "(untitled)"; left.appendChild(title);
     head.appendChild(left);
-    head.appendChild(makeRate(t, ratings));
     card.appendChild(head);
+
+    const rateRow = document.createElement("div"); rateRow.className = "rate-row";
+    rateRow.appendChild(makeRate(t, ratings));
+    card.appendChild(rateRow);
 
     const fields = document.createElement("div"); fields.className = "fields";
     bodyCols.forEach((c) => fields.appendChild(makeField(c, valueFor(t.data, c))));
