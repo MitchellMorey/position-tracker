@@ -97,6 +97,11 @@
   .pos:active { transform: scale(.997); }
   .pos.new { border-color: var(--new); background: var(--new-bg); }
   .pos.new:hover { border-color: #86efac; }
+  .pos.dropped { border-color: var(--danger); background: rgba(239,68,68,0.07); opacity: .92; }
+  .pos.dropped:hover { border-color: #fca5a5; }
+  .badge.drop { color: var(--danger); border-color: var(--danger); }
+  .stat.drop .num { color: var(--danger); }
+  .drop-note { font-size: 12px; color: var(--danger); margin-top: 6px; }
   .pos-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 10px; }
   .pos-title { font-size: 15px; font-weight: 700; }
   .badge { display: inline-block; font-size: 10px; font-weight: 700; color: var(--new); border: 1px solid var(--new); border-radius: 999px; padding: 1px 7px; margin-bottom: 6px; }
@@ -189,11 +194,13 @@
     <div class="stats" style="margin-bottom:16px">
       <div class="stat"><div class="num" id="s-total">0</div><div class="lbl">Total tracked</div></div>
       <div class="stat new"><div class="num" id="s-new">0</div><div class="lbl">New last upload</div></div>
+      <div class="stat drop"><div class="num" id="s-dropped">0</div><div class="lbl">Dropped off</div></div>
       <div class="stat"><div class="num" id="s-rated">0</div><div class="lbl">Rated</div></div>
     </div>
     <div class="toolbar">
       <button id="view-all" class="primary">Show all</button>
       <button id="view-new">New only</button>
+      <button id="view-dropped">Dropped only</button>
       <button id="export">Export (CSV)</button>
       <span class="pill" id="last-upload"></span>
       <span class="pill" id="sync"></span>
@@ -397,6 +404,7 @@ $("process").addEventListener("click", () => {
   }
 
   const idCol = $("idcol").value;
+  const uploadTime = Date.now();
   const positions = getPositions();
   const index = new Map(positions.map((p, i) => [p.id, i]));
   const seen = new Set();
@@ -406,17 +414,20 @@ $("process").addEventListener("click", () => {
     if (!id || seen.has(id)) return;
     seen.add(id);
     if (index.has(id)) {
-      positions[index.get(id)].data = r;
+      const p = positions[index.get(id)];
+      p.data = r;
+      p.lastSeen = uploadTime;
     } else {
-      positions.push({ id, data: r });
+      positions.push({ id, data: r, firstSeen: uploadTime, lastSeen: uploadTime });
       index.set(id, positions.length - 1);
       newIds.push(id);
     }
   });
   savePositions(positions);
   const meta = getMeta();
-  meta.lastUpload = Date.now();
+  meta.lastUpload = uploadTime;
   meta.lastNewIds = newIds;
+  meta.lastSeenIds = [...seen]; // every ID present in this upload
   saveMeta(meta);
 
   currentMode = "all";
@@ -429,11 +440,19 @@ function buildList() {
   const positions = getPositions();
   const meta = getMeta();
   const newIds = new Set(meta.lastNewIds || []);
+  const seenIds = meta.lastSeenIds ? new Set(meta.lastSeenIds) : null;
   const ratings = getRatings();
   const rankOf = (v) => (v ? 6 - Number(v) : 0);
-  let list = positions.map((p, i) => ({ id: p.id, data: p.data, __new: newIds.has(p.id), i }));
+  let list = positions.map((p, i) => ({
+    id: p.id, data: p.data, lastSeen: p.lastSeen,
+    __new: newIds.has(p.id),
+    __dropped: seenIds ? !seenIds.has(p.id) : false,
+    i,
+  }));
   if (currentMode === "new") list = list.filter((t) => t.__new);
+  else if (currentMode === "dropped") list = list.filter((t) => t.__dropped);
   list.sort((a, b) => {
+    if (a.__dropped !== b.__dropped) return a.__dropped ? 1 : -1; // dropped sink to bottom
     const ra = rankOf(ratings[a.id]), rb = rankOf(ratings[b.id]);
     if (ra !== rb) return ra - rb;
     if (a.__new !== b.__new) return a.__new ? -1 : 1;
@@ -451,8 +470,10 @@ function render() {
   const newIds = new Set(meta.lastNewIds || []);
   const ratings = getRatings();
 
+  const seenIds = meta.lastSeenIds ? new Set(meta.lastSeenIds) : null;
   $("s-total").textContent = positions.length;
   $("s-new").textContent = newIds.size;
+  $("s-dropped").textContent = seenIds ? positions.filter((p) => !seenIds.has(p.id)).length : 0;
   $("s-rated").textContent = positions.filter((p) => ratings[p.id]).length;
   $("last-upload").textContent = meta.lastUpload ? "Last upload " + new Date(meta.lastUpload).toLocaleString() : "";
 
@@ -463,7 +484,9 @@ function render() {
 
   if (!list.length) {
     const d = document.createElement("div"); d.className = "empty";
-    d.textContent = currentMode === "new" ? "No new positions in the last upload." : "No positions tracked yet.";
+    d.textContent = currentMode === "new" ? "No new positions in the last upload."
+      : currentMode === "dropped" ? "No positions have dropped off."
+      : "No positions tracked yet.";
     wrap.appendChild(d);
     return;
   }
@@ -471,12 +494,13 @@ function render() {
   const bodyCols = SUMMARY_COLS.filter((c) => norm(c) !== norm("Billet Title"));
   list.forEach((t) => {
     const card = document.createElement("div");
-    card.className = "pos" + (t.__new ? " new" : "");
+    card.className = "pos" + (t.__new ? " new" : "") + (t.__dropped ? " dropped" : "");
     card.title = "Click for full details";
 
     const head = document.createElement("div"); head.className = "pos-head";
     const left = document.createElement("div");
     if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
+    else if (t.__dropped) { const b = document.createElement("div"); b.className = "badge drop"; b.textContent = "DROPPED OFF"; left.appendChild(b); }
     const title = document.createElement("div"); title.className = "pos-title"; title.textContent = valueFor(t.data, "Billet Title") || "(untitled)"; left.appendChild(title);
     head.appendChild(left);
     head.appendChild(makeRate(t, ratings));
@@ -522,13 +546,15 @@ function makeRate(t, ratings) {
 function openModal(t) {
   const ratings = getRatings();
   const modal = $("modal");
-  modal.className = "modal" + (t.__new ? " new" : "");
+  modal.className = "modal" + (t.__new ? " new" : "") + (t.__dropped ? " dropped" : "");
   modal.innerHTML = "";
 
   const head = document.createElement("div"); head.className = "modal-head";
   const left = document.createElement("div");
   if (t.__new) { const b = document.createElement("div"); b.className = "badge"; b.textContent = "NEW"; left.appendChild(b); }
+  else if (t.__dropped) { const b = document.createElement("div"); b.className = "badge drop"; b.textContent = "DROPPED OFF"; left.appendChild(b); }
   const title = document.createElement("div"); title.className = "modal-title"; title.textContent = valueFor(t.data, "Billet Title") || "(untitled)"; left.appendChild(title);
+  if (t.__dropped) { const n = document.createElement("div"); n.className = "drop-note"; n.textContent = "Not in the latest upload" + (t.lastSeen ? " · last seen " + new Date(t.lastSeen).toLocaleString() : ""); left.appendChild(n); }
   head.appendChild(left);
 
   const actions = document.createElement("div"); actions.className = "modal-actions";
@@ -550,6 +576,7 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal
 
 $("view-all").addEventListener("click", () => { currentMode = "all"; render(); });
 $("view-new").addEventListener("click", () => { currentMode = "new"; render(); });
+$("view-dropped").addEventListener("click", () => { currentMode = "dropped"; render(); });
 
 // ---- export ----
 $("export").addEventListener("click", () => {
@@ -558,11 +585,12 @@ $("export").addEventListener("click", () => {
   const ratings = getRatings();
   const cols = EXPECTED_COLUMNS;
   const labelOf = (v) => ((RATINGS.find((r) => r.v === v) || {}).t || "").replace(/^[0-9]+ · /, "");
-  const head = ["New?", ...cols, "Rating", "Rating Label"];
+  const head = ["Status", ...cols, "Rating", "Rating Label"];
+  const statusOf = (t) => (t.__new ? "NEW" : t.__dropped ? "DROPPED OFF" : "Current");
   const lines = [head.map(csv).join(",")];
   list.forEach((t) => {
     const rv = ratings[t.id] || "";
-    lines.push([csv(t.__new ? "NEW" : ""), ...cols.map((c) => csv(valueFor(t.data, c))), csv(rv), csv(labelOf(rv))].join(","));
+    lines.push([csv(statusOf(t)), ...cols.map((c) => csv(valueFor(t.data, c))), csv(rv), csv(labelOf(rv))].join(","));
   });
   const blob = new Blob([lines.join("\n")], { type: "text/csv" });
   const a = document.createElement("a");
