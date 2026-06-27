@@ -120,6 +120,10 @@
   .rate[data-r="2"] { border-color: #f97316; color: #fb923c; }
   .rate[data-r="1"] { border-color: #ef4444; color: #f87171; }
   .empty { color: var(--muted); padding: 20px; }
+  #preview-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;
+    background: rgba(234,179,8,0.12); border: 1px solid #eab308; color: #fde68a; border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; }
+  #preview-banner .ptbtns { display: flex; gap: 8px; }
+  .rate:disabled { opacity: .6; cursor: default; }
 
   /* detail modal */
   #overlay { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; z-index: 50; }
@@ -204,8 +208,18 @@
       <button id="view-new">New only</button>
       <button id="view-dropped">Dropped only</button>
       <button id="export">Export (CSV)</button>
+      <label id="history-wrap" style="font-size:12px;color:var(--muted)">History
+        <select id="history" style="margin-left:6px"></select>
+      </label>
       <span class="pill" id="last-upload"></span>
       <span class="pill" id="sync"></span>
+    </div>
+    <div id="preview-banner" class="hidden">
+      <span id="preview-text"></span>
+      <span class="ptbtns">
+        <button id="revert" class="primary">Revert to this version</button>
+        <button id="back-current">Back to current</button>
+      </span>
     </div>
     <div id="cards"></div>
   </div>
@@ -225,9 +239,11 @@
 <div id="overlay" class="hidden"><div class="modal" id="modal"></div></div>
 
 <script>
-const POS_KEY    = "positionTracker.positions.v2";  // [{id, data}]
-const META_KEY   = "positionTracker.meta.v1";
-const RATING_KEY = "positionTracker.ratings.v1";
+const POS_KEY     = "positionTracker.positions.v2";  // [{id, data}]
+const META_KEY    = "positionTracker.meta.v1";
+const RATING_KEY  = "positionTracker.ratings.v1";
+const HISTORY_KEY = "positionTracker.history.v1";    // [{at,label,count,newCount,dropped,positions,meta}]
+const HISTORY_MAX = 30;
 
 // Canonical structure — a file must contain exactly these columns to be accepted.
 const EXPECTED_COLUMNS = [
@@ -269,6 +285,51 @@ function getMeta() { try { return JSON.parse(localStorage.getItem(META_KEY) || "
 function saveMeta(m) { localStorage.setItem(META_KEY, JSON.stringify(m)); scheduleSync(); }
 function getRatings() { try { return JSON.parse(localStorage.getItem(RATING_KEY) || "{}"); } catch { return {}; } }
 function saveRatings(r) { localStorage.setItem(RATING_KEY, JSON.stringify(r)); scheduleSync(); }
+function getHistory() { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]"); } catch { return []; } }
+function saveHistory(h) { localStorage.setItem(HISTORY_KEY, JSON.stringify(h)); scheduleSync(); }
+
+let viewSnapshot = null; // null = viewing current; otherwise a history entry being previewed
+
+// data source for rendering: current state, or the snapshot being previewed
+function activeData() {
+  if (viewSnapshot) return { positions: viewSnapshot.positions || [], meta: viewSnapshot.meta || {} };
+  return { positions: getPositions(), meta: getMeta() };
+}
+
+function snapshot(label, at) {
+  const positions = getPositions();
+  const meta = getMeta();
+  const seen = meta.lastSeenIds ? new Set(meta.lastSeenIds) : null;
+  return {
+    at: at || meta.lastUpload || Date.now(),
+    label: label || "",
+    count: positions.length,
+    newCount: (meta.lastNewIds || []).length,
+    dropped: seen ? positions.filter((p) => !seen.has(p.id)).length : 0,
+    positions: JSON.parse(JSON.stringify(positions)),
+    meta: JSON.parse(JSON.stringify(meta)),
+  };
+}
+function pushSnapshot(label, at) {
+  const h = getHistory();
+  h.unshift(snapshot(label, at));
+  saveHistory(h.slice(0, HISTORY_MAX));
+}
+function populateHistory() {
+  const h = getHistory();
+  const sel = $("history");
+  if (!h.length) { $("history-wrap").style.display = "none"; return; }
+  $("history-wrap").style.display = "";
+  sel.innerHTML = "";
+  h.forEach((s, i) => {
+    const o = document.createElement("option");
+    o.value = String(i);
+    const when = new Date(s.at).toLocaleString();
+    o.textContent = (i === 0 ? "Latest · " : "") + when + ` (${s.count})` + (s.label ? " · " + s.label : "");
+    sel.appendChild(o);
+  });
+  sel.value = "0";
+}
 
 // ---- backend sync (Vercel KV) ----
 let syncTimer = null, suspendSync = false;
@@ -280,7 +341,7 @@ function scheduleSync() {
   syncTimer = setTimeout(pushToBackend, 500);
 }
 async function pushToBackend() {
-  const state = { positions: getPositions(), meta: getMeta(), ratings: getRatings() };
+  const state = { positions: getPositions(), meta: getMeta(), ratings: getRatings(), history: getHistory() };
   try {
     const r = await fetch("/api/data", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(state) });
     setSync(r.ok ? "Saved to server" : "Saved locally (server error)");
@@ -298,6 +359,7 @@ async function loadFromBackend() {
       localStorage.setItem(POS_KEY, JSON.stringify(j.data.positions || []));
       localStorage.setItem(META_KEY, JSON.stringify(j.data.meta || {}));
       localStorage.setItem(RATING_KEY, JSON.stringify(j.data.ratings || {}));
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(j.data.history || []));
       suspendSync = false;
       setSync("Synced from server");
     } else if (getPositions().length || Object.keys(getRatings()).length) {
@@ -309,6 +371,12 @@ async function loadFromBackend() {
   } catch {
     setSync("Using local data (server unavailable)");
   }
+  // seed a baseline snapshot for data that predates the history feature
+  if (!getHistory().length && getPositions().length) {
+    const meta = getMeta();
+    pushSnapshot("Baseline", meta.lastUpload || Date.now());
+  }
+  populateHistory();
   refreshMemo();
   render();
 }
@@ -431,16 +499,19 @@ $("process").addEventListener("click", () => {
   meta.lastNewIds = newIds;
   meta.lastSeenIds = [...seen]; // every ID present in this upload
   saveMeta(meta);
+  pushSnapshot(); // record this upload in history
 
+  viewSnapshot = null;
+  $("preview-banner").classList.add("hidden");
   currentMode = "all";
+  populateHistory();
   render();
   refreshMemo();
 });
 
 // ---- build the sorted, tagged list shared by render + export ----
 function buildList() {
-  const positions = getPositions();
-  const meta = getMeta();
+  const { positions, meta } = activeData();
   const newIds = new Set(meta.lastNewIds || []);
   const seenIds = meta.lastSeenIds ? new Set(meta.lastSeenIds) : null;
   const ratings = getRatings();
@@ -465,10 +536,9 @@ function buildList() {
 
 // ---- render ----
 function render() {
-  const positions = getPositions();
-  if (!positions.length) { $("results").classList.add("hidden"); return; }
+  const { positions, meta } = activeData();
+  if (!positions.length && !viewSnapshot) { $("results").classList.add("hidden"); return; }
 
-  const meta = getMeta();
   const newIds = new Set(meta.lastNewIds || []);
   const ratings = getRatings();
 
@@ -508,7 +578,8 @@ function render() {
     card.appendChild(head);
 
     const rateRow = document.createElement("div"); rateRow.className = "rate-row";
-    rateRow.appendChild(makeRate(t, ratings));
+    const rsel = makeRate(t, ratings); if (viewSnapshot) rsel.disabled = true;
+    rateRow.appendChild(rsel);
     card.appendChild(rateRow);
 
     const fields = document.createElement("div"); fields.className = "fields";
@@ -563,7 +634,8 @@ function openModal(t) {
   head.appendChild(left);
 
   const actions = document.createElement("div"); actions.className = "modal-actions";
-  actions.appendChild(makeRate(t, ratings));
+  const mrate = makeRate(t, ratings); if (viewSnapshot) mrate.disabled = true;
+  actions.appendChild(mrate);
   const x = document.createElement("button"); x.className = "close"; x.innerHTML = "&times;"; x.title = "Close"; x.addEventListener("click", closeModal);
   actions.appendChild(x);
   head.appendChild(actions);
@@ -582,6 +654,44 @@ document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal
 $("view-all").addEventListener("click", () => { currentMode = "all"; render(); });
 $("view-new").addEventListener("click", () => { currentMode = "new"; render(); });
 $("view-dropped").addEventListener("click", () => { currentMode = "dropped"; render(); });
+
+// ---- history preview / revert ----
+$("history").addEventListener("change", () => {
+  const i = parseInt($("history").value, 10);
+  const h = getHistory();
+  if (i === 0 || !h[i]) {
+    viewSnapshot = null;
+    $("preview-banner").classList.add("hidden");
+  } else {
+    viewSnapshot = h[i];
+    $("preview-text").textContent = "Viewing the upload from " + new Date(viewSnapshot.at).toLocaleString() + " — read-only preview.";
+    $("preview-banner").classList.remove("hidden");
+  }
+  render();
+});
+$("back-current").addEventListener("click", () => {
+  viewSnapshot = null;
+  $("preview-banner").classList.add("hidden");
+  $("history").value = "0";
+  render();
+});
+$("revert").addEventListener("click", () => {
+  if (!viewSnapshot) return;
+  const when = new Date(viewSnapshot.at).toLocaleString();
+  if (!confirm(`Replace your current data with the version from ${when}? Your ratings are kept, and this revert is saved to history so you can undo it.`)) return;
+  suspendSync = true;
+  localStorage.setItem(POS_KEY, JSON.stringify(viewSnapshot.positions || []));
+  localStorage.setItem(META_KEY, JSON.stringify(viewSnapshot.meta || {}));
+  suspendSync = false;
+  viewSnapshot = null;
+  pushSnapshot("Reverted to " + when, Date.now());
+  $("preview-banner").classList.add("hidden");
+  currentMode = "all";
+  populateHistory();
+  render();
+  refreshMemo();
+  pushToBackend();
+});
 
 // ---- export ----
 $("export").addEventListener("click", () => {
@@ -658,6 +768,7 @@ $("logout").addEventListener("click", async () => {
   localStorage.removeItem(POS_KEY);
   localStorage.removeItem(META_KEY);
   localStorage.removeItem(RATING_KEY);
+  localStorage.removeItem(HISTORY_KEY);
   location.reload();
 });
 
